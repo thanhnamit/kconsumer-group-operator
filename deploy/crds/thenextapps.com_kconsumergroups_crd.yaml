@@ -1,0 +1,80 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: kconsumergroups.thenextapps.com
+spec:
+  group: thenextapps.com
+  names:
+    kind: KconsumerGroup
+    listKind: KconsumerGroupList
+    plural: kconsumergroups
+    singular: kconsumergroup
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: KconsumerGroup is the Schema for the kconsumergroups API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: KconsumerGroupSpec defines the desired state of KconsumerGroup
+            properties:
+              autoscaling:
+                type: boolean
+              consumerSpec:
+                description: ConsumerSpec defines the consumer's attributes
+                properties:
+                  containerName:
+                    type: string
+                  image:
+                    type: string
+                  throughput:
+                    format: int32
+                    type: integer
+                  topic:
+                    type: string
+                required:
+                - containerName
+                - image
+                - throughput
+                - topic
+                type: object
+              minReplicas:
+                format: int32
+                type: integer
+            required:
+            - autoscaling
+            - consumerSpec
+            - minReplicas
+            type: object
+          status:
+            description: KconsumerGroupStatus defines the observed state of KconsumerGroup
+            properties:
+              nodes:
+                items:
+                  type: string
+                type: array
+              replicas:
+                format: int32
+                type: integer
+            required:
+            - nodes
+            - replicas
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

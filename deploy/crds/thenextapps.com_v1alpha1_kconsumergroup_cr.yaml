@@ -1,0 +1,7 @@
+apiVersion: thenextapps.com/v1alpha1
+kind: KconsumerGroup
+metadata:
+  name: example-kconsumergroup
+spec:
+  # Add fields here
+  size: 3
