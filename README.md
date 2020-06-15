@@ -3,6 +3,7 @@
 KConsumerGroup
   metadata
     name: String  
+    namespace: String
   consumerSpec:
     - image: String: The image and version
     - topic: String

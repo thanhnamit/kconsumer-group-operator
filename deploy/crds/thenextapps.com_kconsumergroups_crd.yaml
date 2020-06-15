@@ -31,8 +31,9 @@ spec:
           spec:
             description: KconsumerGroupSpec defines the desired state of KconsumerGroup
             properties:
-              autoscaling:
-                type: boolean
+              averageRecordsLagLimit:
+                format: int32
+                type: integer
               consumerSpec:
                 description: ConsumerSpec defines the consumer's attributes
                 properties:
@@ -40,37 +41,36 @@ spec:
                     type: string
                   image:
                     type: string
-                  throughput:
-                    format: int32
-                    type: integer
                   topic:
                     type: string
                 required:
                 - containerName
                 - image
-                - throughput
                 - topic
                 type: object
               minReplicas:
                 format: int32
                 type: integer
             required:
-            - autoscaling
+            - averageRecordsLagLimit
             - consumerSpec
             - minReplicas
             type: object
           status:
             description: KconsumerGroupStatus defines the observed state of KconsumerGroup
             properties:
-              nodes:
+              activePods:
                 items:
                   type: string
                 type: array
+              message:
+                type: string
               replicas:
                 format: int32
                 type: integer
             required:
-            - nodes
+            - activePods
+            - message
             - replicas
             type: object
         type: object
