@@ -10,12 +10,12 @@ import (
 	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-	"k8s.io/client-go/rest"
-
+	monitoringv1 "github.com/coreos/prometheus-operator/pkg/apis/monitoring/v1"
 	"github.com/thanhnamit/kconsumer-group-operator/pkg/apis"
 	"github.com/thanhnamit/kconsumer-group-operator/pkg/controller"
 	"github.com/thanhnamit/kconsumer-group-operator/version"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
 
 	"github.com/operator-framework/operator-sdk/pkg/k8sutil"
 	kubemetrics "github.com/operator-framework/operator-sdk/pkg/kube-metrics"
@@ -119,6 +119,11 @@ func main() {
 
 	// Setup Scheme for all resources
 	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {
+		log.Error(err, "")
+		os.Exit(1)
+	}
+
+	if err := monitoringv1.AddToScheme(mgr.GetScheme()); err != nil {
 		log.Error(err, "")
 		os.Exit(1)
 	}

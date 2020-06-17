@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	monitoringv1 "github.com/coreos/prometheus-operator/pkg/apis/monitoring/v1"
 	thenextappsv1alpha1 "github.com/thanhnamit/kconsumer-group-operator/pkg/apis/thenextapps/v1alpha1"
@@ -144,15 +145,6 @@ func (r *ReconcileKconsumerGroup) Reconcile(request reconcile.Request) (reconcil
 		return *reconcileResult, nil
 	}
 
-	// Manage Deployment
-	reconcileResult, err = r.manageDeployment(kgrp)
-	if err != nil {
-		r.updateStatus(kgrp, "Error managing Deployment", false, err)
-		return *reconcileResult, err
-	} else if err == nil && reconcileResult != nil {
-		return *reconcileResult, nil
-	}
-
 	// Manage ServiceMonitor
 	reconcileResult, err = r.manageServiceMonitor(kgrp)
 	if err != nil {
@@ -180,6 +172,16 @@ func (r *ReconcileKconsumerGroup) Reconcile(request reconcile.Request) (reconcil
 		return *reconcileResult, nil
 	}
 
+	// Manage Deployment
+	reconcileResult, err = r.manageDeployment(kgrp)
+	if err != nil {
+		r.updateStatus(kgrp, "Error managing Deployment", false, err)
+		return *reconcileResult, err
+	} else if err == nil && reconcileResult != nil {
+		return *reconcileResult, nil
+	}
+
+	log.Info("Update reconciliation status")
 	reconcileResult, err = r.updateStatus(kgrp, "Reconciliation completed", true, nil)
 	return *reconcileResult, err
 }
@@ -214,10 +216,10 @@ func (r *ReconcileKconsumerGroup) manageService(kgrp *thenextappsv1alpha1.Kconsu
 	service := &corev1.Service{}
 	err := r.client.Get(context.TODO(), types.NamespacedName{Name: kgrp.Name, Namespace: kgrp.Namespace}, service)
 	if err != nil && errors.IsNotFound(err) {
-		log.Info("Adding new Kconsumer service")
-		err := r.createService(kgrp, service)
+		log.Info("Creating Kconsumer service")
+		service, err := r.createService(kgrp)
 		err = r.createObj(service)
-		return r.handleCreationErr("Errors creating Kconsumer service", err)
+		return r.handleCreationResult("Errors creating Kconsumer service", err)
 	} else if err != nil {
 		return r.handleFetchingErr("Failed to get Kconsumer service", err)
 	} else {
@@ -226,12 +228,11 @@ func (r *ReconcileKconsumerGroup) manageService(kgrp *thenextappsv1alpha1.Kconsu
 	return nil, nil
 }
 
-func (r *ReconcileKconsumerGroup) createService(kgrp *thenextappsv1alpha1.KconsumerGroup, service *corev1.Service) error {
+func (r *ReconcileKconsumerGroup) createService(kgrp *thenextappsv1alpha1.KconsumerGroup) (*corev1.Service, error) {
 	labels := appLabels(kgrp.Name)
-
-	service = &corev1.Service{
+	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      kgrp.Name,
+			Name:      "kconsumer",
 			Namespace: kgrp.Namespace,
 			Labels:    labels,
 		},
@@ -248,28 +249,29 @@ func (r *ReconcileKconsumerGroup) createService(kgrp *thenextappsv1alpha1.Kconsu
 			Selector: labels,
 		},
 	}
-	return r.setOwnerReference(kgrp, service)
+
+	return service, r.setOwnerReference(kgrp, service)
 }
 
 func (r *ReconcileKconsumerGroup) manageServiceMonitor(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
 	sm := &monitoringv1.ServiceMonitor{}
 	err := r.getObj(kgrp, sm)
 	if err != nil && errors.IsNotFound(err) {
-		log.Info("Creating Kconsumer service monitor: ", sm.Namespace, ":", sm.Name)
-		err := r.createServiceMonitor(kgrp, sm)
+		log.Info("Creating Kconsumer service monitor")
+		sm, err := r.createServiceMonitor(kgrp)
 		err = r.createObj(sm)
-		return r.handleCreationErr("Errors creating Kconsumer service monitor", err)
+		return r.handleCreationResult("Errors creating Kconsumer service monitor", err)
 	} else if err != nil {
 		return r.handleFetchingErr("Failed to get Kconsumer service monitoring", err)
 	} else {
 		log.Info("Not handling Service Monitor update")
+		return nil, nil
 	}
-	return nil, nil
 }
 
-func (r *ReconcileKconsumerGroup) createServiceMonitor(kgrp *thenextappsv1alpha1.KconsumerGroup, sm *monitoringv1.ServiceMonitor) error {
+func (r *ReconcileKconsumerGroup) createServiceMonitor(kgrp *thenextappsv1alpha1.KconsumerGroup) (*monitoringv1.ServiceMonitor, error) {
 	labels := appLabels(kgrp.Name)
-	sm = &monitoringv1.ServiceMonitor{
+	sm := &monitoringv1.ServiceMonitor{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      kgrp.Name,
 			Namespace: kgrp.Namespace,
@@ -296,31 +298,35 @@ func (r *ReconcileKconsumerGroup) createServiceMonitor(kgrp *thenextappsv1alpha1
 			},
 		},
 	}
-	return r.setOwnerReference(kgrp, sm)
+	return sm, r.setOwnerReference(kgrp, sm)
 }
 
 func (r *ReconcileKconsumerGroup) manageDeployment(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
 	deployment := &appsv1.Deployment{}
 	err := r.getObj(kgrp, deployment)
 	if err != nil && errors.IsNotFound(err) {
-		log.Info("Adding new Kconsumer deployment")
-		err := r.createDeployment(kgrp, deployment)
+		log.Info("Creating Kconsumer deployment")
+		deployment, err := r.createDeployment(kgrp)
 		err = r.createObj(deployment)
-		return r.handleCreationErr("Errors creating Kconsumer deployment", err)
+		return r.handleCreationResult("Errors creating Kconsumer deployment", err)
 	} else if err != nil {
 		return r.handleFetchingErr("Failed to get Kconsumer deployment", err)
 	} else {
-		err := r.createDeployment(kgrp, deployment)
-		err = r.updateObj(deployment)
-		return r.handleUpdateErr("Failed to update Kconsumer deployment", err)
+		updateRequired, err := r.updateDeployment(kgrp, deployment)
+		if updateRequired {
+			log.Info("Updating Kconsumer deployment")
+			err = r.updateObj(deployment)
+			return r.handleUpdateResult("Failed to update Kconsumer Deployment", err)
+		}
+		return nil, nil
 	}
 }
 
-func (r *ReconcileKconsumerGroup) createDeployment(kgrp *thenextappsv1alpha1.KconsumerGroup, dp *appsv1.Deployment) error {
+func (r *ReconcileKconsumerGroup) createDeployment(kgrp *thenextappsv1alpha1.KconsumerGroup) (*appsv1.Deployment, error) {
 	var replicas int32
 	replicas = kgrp.Spec.MinReplicas
 	labels := appLabels(kgrp.Name)
-	dp = &appsv1.Deployment{
+	dp := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      kgrp.Name,
 			Namespace: kgrp.Namespace,
@@ -354,7 +360,16 @@ func (r *ReconcileKconsumerGroup) createDeployment(kgrp *thenextappsv1alpha1.Kco
 			},
 		},
 	}
-	return r.setOwnerReference(kgrp, dp)
+	return dp, r.setOwnerReference(kgrp, dp)
+}
+
+func (r *ReconcileKconsumerGroup) updateDeployment(kgrp *thenextappsv1alpha1.KconsumerGroup, dp *appsv1.Deployment) (bool, error) {
+	if *dp.Spec.Replicas != kgrp.Spec.MinReplicas || dp.Spec.Template.Spec.Containers[0].Image != kgrp.Spec.ConsumerSpec.Image {
+		dp.Spec.Replicas = &kgrp.Spec.MinReplicas
+		dp.Spec.Template.Spec.Containers[0].Image = kgrp.Spec.ConsumerSpec.Image
+		return true, r.setOwnerReference(kgrp, dp)
+	}
+	return false, r.setOwnerReference(kgrp, dp)
 }
 
 func (r *ReconcileKconsumerGroup) managePrometheusRule(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
@@ -362,28 +377,28 @@ func (r *ReconcileKconsumerGroup) managePrometheusRule(kgrp *thenextappsv1alpha1
 	err := r.getObj(kgrp, pr)
 	if err != nil && errors.IsNotFound(err) {
 		log.Info("Creating Kconsumer Prometheus Rule")
-		err := r.createPrometheusRule(kgrp, pr)
+		pr, err := r.createPrometheusRule(kgrp)
 		err = r.createObj(pr)
-		return r.handleCreationErr("Errors creating Kconsumer Prometheus Rule", err)
+		return r.handleCreationResult("Errors creating Kconsumer Prometheus Rule", err)
 	} else if err != nil {
 		return r.handleFetchingErr("Failed to get Kconsumer Prometheus Rule", err)
 	} else {
-		err := r.createPrometheusRule(kgrp, pr)
-		err = r.updateObj(pr)
-		return r.handleUpdateErr("Failed to update Kconsumer Prometheus Rule", err)
+		log.Info("Not handling Prometheus Rule update")
+		return nil, nil
 	}
 }
 
-func (r *ReconcileKconsumerGroup) createPrometheusRule(kgrp *thenextappsv1alpha1.KconsumerGroup, pr *monitoringv1.PrometheusRule) error {
+func (r *ReconcileKconsumerGroup) createPrometheusRule(kgrp *thenextappsv1alpha1.KconsumerGroup) (*monitoringv1.PrometheusRule, error) {
 	topicName := kgrp.Spec.ConsumerSpec.Topic
 	clientID := kgrp.Name + "-app-0"
 	limit := kgrp.Spec.AverageRecordsLagLimit
 	expr := fmt.Sprintf("sum(kafka_consumer_fetch_manager_records_lag{topic=\"%s\",client_id=\"%s\"}) > %d", topicName, clientID, limit)
 
-	pr = &monitoringv1.PrometheusRule{
+	// Note: has to be created in same namespace as operator
+	pr := &monitoringv1.PrometheusRule{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      kgrp.Name + "-alert-rule",
-			Namespace: "monitoring",
+			Name:      kgrp.Name,
+			Namespace: kgrp.Namespace,
 			Labels: map[string]string{
 				"prometheus": "k8s",
 				"role":       "alert-rules",
@@ -410,29 +425,35 @@ func (r *ReconcileKconsumerGroup) createPrometheusRule(kgrp *thenextappsv1alpha1
 			},
 		},
 	}
-	return r.setOwnerReference(kgrp, pr)
+	return pr, r.setOwnerReference(kgrp, pr)
 }
 
 func (r *ReconcileKconsumerGroup) manageHPA(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
 	hpa := &autoscaling.HorizontalPodAutoscaler{}
 	err := r.getObj(kgrp, hpa)
 	if err != nil && errors.IsNotFound(err) {
-		log.Info("Adding new Kconsumer HPA")
-		err := r.createHPA(kgrp, hpa)
+		log.Info("Creating Kconsumer HPA")
+		hpa, err := r.createHPA(kgrp)
 		err = r.createObj(hpa)
-		return r.handleCreationErr("Errors creating Kconsumer HPA", err)
+		return r.handleCreationResult("Errors creating Kconsumer HPA", err)
 	} else if err != nil {
 		return r.handleFetchingErr("Failed to get Kconsumer HPA", err)
 	} else {
-		err := r.createHPA(kgrp, hpa)
-		err = r.updateObj(hpa)
-		return r.handleUpdateErr("Failed to update Kconsumer HPA", err)
+		updateRequired, err := r.updateHPA(kgrp, hpa)
+		if updateRequired {
+			log.Info("Updating Kconsumer HPA")
+			err = r.updateObj(hpa)
+			return r.handleUpdateResult("Failed to update Kconsumer HPA", err)
+		}
+		return nil, nil
 	}
 }
 
-func (r *ReconcileKconsumerGroup) createHPA(kgrp *thenextappsv1alpha1.KconsumerGroup, hpa *autoscaling.HorizontalPodAutoscaler) error {
+func (r *ReconcileKconsumerGroup) createHPA(kgrp *thenextappsv1alpha1.KconsumerGroup) (*autoscaling.HorizontalPodAutoscaler, error) {
 	partitions, _ := r.getTopicPartition(kgrp)
-	hpa = &autoscaling.HorizontalPodAutoscaler{
+	var limit string
+	limit = strconv.Itoa(int(kgrp.Spec.AverageRecordsLagLimit))
+	hpa := &autoscaling.HorizontalPodAutoscaler{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      kgrp.Name,
 			Namespace: kgrp.Namespace,
@@ -449,13 +470,22 @@ func (r *ReconcileKconsumerGroup) createHPA(kgrp *thenextappsv1alpha1.KconsumerG
 					Type: autoscaling.PodsMetricSourceType,
 					Pods: &autoscaling.PodsMetricSource{
 						MetricName:         "kafka_consumer_consumer_fetch_manager_metrics_records_lag",
-						TargetAverageValue: resource.MustParse(string(kgrp.Spec.AverageRecordsLagLimit)),
+						TargetAverageValue: resource.MustParse(limit),
 					},
 				},
 			},
 		},
 	}
-	return r.setOwnerReference(kgrp, hpa)
+	return hpa, r.setOwnerReference(kgrp, hpa)
+}
+
+func (r *ReconcileKconsumerGroup) updateHPA(kgrp *thenextappsv1alpha1.KconsumerGroup, hpa *autoscaling.HorizontalPodAutoscaler) (bool, error) {
+	partitions, _ := r.getTopicPartition(kgrp)
+	if hpa.Spec.MaxReplicas != int32(partitions) {
+		hpa.Spec.MaxReplicas = int32(partitions)
+		return true, r.setOwnerReference(kgrp, hpa)
+	}
+	return false, r.setOwnerReference(kgrp, hpa)
 }
 
 func (r *ReconcileKconsumerGroup) getTopicStruct(kgrp *thenextappsv1alpha1.KconsumerGroup) *unstructured.Unstructured {
@@ -479,15 +509,17 @@ func (r *ReconcileKconsumerGroup) getTopicPartition(kgrp *thenextappsv1alpha1.Kc
 		Namespace: u.GetNamespace(),
 	}, u)
 	if err != nil && errors.IsNotFound(err) {
-		log.Error(err, "Topic not found for: ", u.GetNamespace(), ":", u.GetName())
-		panic(err)
+		log.Info("Topic not found")
+		partitions = 1
+		return partitions, nil
 	} else if err != nil {
-		log.Error(err, "Unable to get topic: ", u.GetNamespace(), ":", u.GetName())
-		panic(err)
+		log.Info("Unable to get topic")
+		partitions = 1
+		return partitions, nil
 	}
 	partitions, found, err := unstructured.NestedInt64(u.Object, "spec", "partitions")
 	if err != nil || found == false {
-		log.Error(err, "Problem getting topic partitions: ", u.GetNamespace(), ":", u.GetName())
+		log.Error(err, "Problem getting topic partitions")
 		log.Info("Set default partitions to 1")
 		partitions = 1
 	}
@@ -514,7 +546,7 @@ func (r *ReconcileKconsumerGroup) setOwnerReference(kgrp *thenextappsv1alpha1.Kc
 	return nil
 }
 
-func (r *ReconcileKconsumerGroup) handleCreationErr(msg string, err error) (*reconcile.Result, error) {
+func (r *ReconcileKconsumerGroup) handleCreationResult(msg string, err error) (*reconcile.Result, error) {
 	if err != nil {
 		log.Error(err, msg)
 		return &reconcile.Result{}, err
@@ -522,7 +554,7 @@ func (r *ReconcileKconsumerGroup) handleCreationErr(msg string, err error) (*rec
 	return &reconcile.Result{Requeue: true}, nil
 }
 
-func (r *ReconcileKconsumerGroup) handleUpdateErr(msg string, err error) (*reconcile.Result, error) {
+func (r *ReconcileKconsumerGroup) handleUpdateResult(msg string, err error) (*reconcile.Result, error) {
 	if err != nil {
 		log.Error(err, msg)
 		return &reconcile.Result{}, err

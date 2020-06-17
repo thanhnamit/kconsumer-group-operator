@@ -16,7 +16,7 @@ spec:
       containers:
         - name: kconsumer-group-operator
           # Replace this with the built image name
-          image: REPLACE_IMAGE
+          image: thenextapps/kconsumer-group-operator:v0.0.1
           command:
           - kconsumer-group-operator
           imagePullPolicy: Always
