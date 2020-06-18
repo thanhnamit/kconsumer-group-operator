@@ -281,7 +281,7 @@ func (r *ReconcileKconsumerGroup) createServiceMonitor(kgrp *thenextappsv1alpha1
 			},
 			NamespaceSelector: monitoringv1.NamespaceSelector{
 				MatchNames: []string{
-					kgrp.Name,
+					kgrp.Namespace,
 				},
 			},
 			Endpoints: []monitoringv1.Endpoint{
