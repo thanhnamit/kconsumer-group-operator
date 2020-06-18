@@ -1,7 +1,11 @@
 apiVersion: thenextapps.com/v1alpha1
 kind: KconsumerGroup
 metadata:
-  name: example-kconsumergroup
+  name: kconsumer
 spec:
-  # Add fields here
-  size: 3
+  minReplicas: 1
+  averageRecordsLagLimit: 1000
+  consumerSpec:
+    containerName: kconsumer
+    image: thenextapps/kconsumer:latest
+    topic: fast-data-topic

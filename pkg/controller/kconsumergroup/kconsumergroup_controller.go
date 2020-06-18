@@ -30,6 +30,7 @@ import (
 )
 
 const (
+	consumerName   = "kconsumer"
 	controllerName = "controller_kconsumergroup"
 	kafkaTopic     = "fast-data-topic"
 )
@@ -126,9 +127,12 @@ type ReconcileKconsumerGroup struct {
 // and what is in the KconsumerGroup.Spec as well as Resources not owned by the owner
 func (r *ReconcileKconsumerGroup) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
-	reqLogger.Info("Fetching & Reconciling KconsumerGroup")
+	reqLogger.Info("Reconciling KconsumerGroup")
 	kgrp := &thenextappsv1alpha1.KconsumerGroup{}
-	err := r.client.Get(context.TODO(), request.NamespacedName, kgrp)
+	err := r.client.Get(context.TODO(), types.NamespacedName{
+		Namespace: request.Namespace,
+		Name:      consumerName,
+	}, kgrp)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return reconcile.Result{}, nil
@@ -137,45 +141,56 @@ func (r *ReconcileKconsumerGroup) Reconcile(request reconcile.Request) (reconcil
 	}
 
 	// Manage Service
-	reconcileResult, err := r.manageService(kgrp)
+	reconcileResult, err := r.reconcileService(kgrp)
 	if err != nil {
-		r.updateStatus(kgrp, "Error managing service", false, err)
+		r.updateStatus(kgrp, "Error reconciling Service", false, err)
 		return *reconcileResult, err
 	} else if err == nil && reconcileResult != nil {
 		return *reconcileResult, nil
 	}
 
 	// Manage ServiceMonitor
-	reconcileResult, err = r.manageServiceMonitor(kgrp)
+	reconcileResult, err = r.reconcileServiceMonitor(kgrp)
 	if err != nil {
-		r.updateStatus(kgrp, "Error managing Service Monitor", false, err)
+		r.updateStatus(kgrp, "Error reconciling Service Monitor", false, err)
 		return *reconcileResult, err
 	} else if err == nil && reconcileResult != nil {
 		return *reconcileResult, nil
 	}
 
 	// Manage PrometheusRule
-	reconcileResult, err = r.managePrometheusRule(kgrp)
+	reconcileResult, err = r.reconcilePrometheusRule(kgrp)
 	if err != nil {
-		r.updateStatus(kgrp, "Error managing Prometheus Rule", false, err)
+		r.updateStatus(kgrp, "Error reconciling Prometheus Rule", false, err)
 		return *reconcileResult, err
 	} else if err == nil && reconcileResult != nil {
 		return *reconcileResult, nil
 	}
 
 	// Manage HPA
-	reconcileResult, err = r.manageHPA(kgrp)
+	reconcileResult, err = r.reconcileHPA(kgrp)
 	if err != nil {
-		r.updateStatus(kgrp, "Error managing HPA", false, err)
+		r.updateStatus(kgrp, "Error reconciling HPA", false, err)
 		return *reconcileResult, err
 	} else if err == nil && reconcileResult != nil {
 		return *reconcileResult, nil
 	}
 
-	// Manage Deployment
-	reconcileResult, err = r.manageDeployment(kgrp)
+	// Manage Kafka topic changes
+	reconcileResult, err = r.reconcileTopicChange(kgrp, request)
 	if err != nil {
-		r.updateStatus(kgrp, "Error managing Deployment", false, err)
+		reqLogger.Error(err, "Error with reconciling topic")
+		r.updateStatus(kgrp, "Error reconciling Kconsumer group for topic changes", false, err)
+		return *reconcileResult, err
+	} else if err == nil && reconcileResult != nil {
+		reqLogger.Error(err, "No Error with reconciling topic")
+		return *reconcileResult, nil
+	}
+
+	// Manage Deployment
+	reconcileResult, err = r.reconcileDeployment(kgrp)
+	if err != nil {
+		r.updateStatus(kgrp, "Error reconciling Deployment", false, err)
 		return *reconcileResult, err
 	} else if err == nil && reconcileResult != nil {
 		return *reconcileResult, nil
@@ -186,33 +201,15 @@ func (r *ReconcileKconsumerGroup) Reconcile(request reconcile.Request) (reconcil
 	return *reconcileResult, err
 }
 
-func (r *ReconcileKconsumerGroup) updateStatus(kgrp *thenextappsv1alpha1.KconsumerGroup, message string, podStatus bool, err error) (*reconcile.Result, error) {
-	kgrp.Status.Message = fmt.Sprintf("Message: %s, Error: %v", message, err)
-
-	if podStatus == true {
-		pods := &corev1.PodList{}
-		opts := []client.ListOption{
-			client.InNamespace(kgrp.Namespace),
-			client.MatchingLabels(appLabels(kgrp.Name)),
-		}
-		if err := r.client.List(context.TODO(), pods, opts...); err != nil {
-			log.Error(err, "Failed to fetch pods", kgrp.Namespace, ":", kgrp.Name)
-			return &reconcile.Result{}, err
-		}
-		podNames := getPodNames(pods.Items)
-		if !reflect.DeepEqual(podNames, kgrp.Status.ActivePods) {
-			kgrp.Status.ActivePods = podNames
-		}
+func (r *ReconcileKconsumerGroup) reconcileTopicChange(kgrp *thenextappsv1alpha1.KconsumerGroup, request reconcile.Request) (*reconcile.Result, error) {
+	if request.Name != kafkaTopic {
+		return nil, nil
 	}
-
-	if err := r.client.Status().Update(context.TODO(), kgrp); err != nil {
-		log.Error(err, "Failed to update resource status")
-		return &reconcile.Result{}, err
-	}
-	return &reconcile.Result{}, nil
+	log.Info("Reconciling HPA topic changes")
+	return r.reconcileHPA(kgrp)
 }
 
-func (r *ReconcileKconsumerGroup) manageService(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
+func (r *ReconcileKconsumerGroup) reconcileService(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
 	service := &corev1.Service{}
 	err := r.client.Get(context.TODO(), types.NamespacedName{Name: kgrp.Name, Namespace: kgrp.Namespace}, service)
 	if err != nil && errors.IsNotFound(err) {
@@ -232,7 +229,7 @@ func (r *ReconcileKconsumerGroup) createService(kgrp *thenextappsv1alpha1.Kconsu
 	labels := appLabels(kgrp.Name)
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "kconsumer",
+			Name:      consumerName,
 			Namespace: kgrp.Namespace,
 			Labels:    labels,
 		},
@@ -253,7 +250,7 @@ func (r *ReconcileKconsumerGroup) createService(kgrp *thenextappsv1alpha1.Kconsu
 	return service, r.setOwnerReference(kgrp, service)
 }
 
-func (r *ReconcileKconsumerGroup) manageServiceMonitor(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
+func (r *ReconcileKconsumerGroup) reconcileServiceMonitor(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
 	sm := &monitoringv1.ServiceMonitor{}
 	err := r.getObj(kgrp, sm)
 	if err != nil && errors.IsNotFound(err) {
@@ -301,7 +298,7 @@ func (r *ReconcileKconsumerGroup) createServiceMonitor(kgrp *thenextappsv1alpha1
 	return sm, r.setOwnerReference(kgrp, sm)
 }
 
-func (r *ReconcileKconsumerGroup) manageDeployment(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
+func (r *ReconcileKconsumerGroup) reconcileDeployment(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
 	deployment := &appsv1.Deployment{}
 	err := r.getObj(kgrp, deployment)
 	if err != nil && errors.IsNotFound(err) {
@@ -372,7 +369,7 @@ func (r *ReconcileKconsumerGroup) updateDeployment(kgrp *thenextappsv1alpha1.Kco
 	return false, r.setOwnerReference(kgrp, dp)
 }
 
-func (r *ReconcileKconsumerGroup) managePrometheusRule(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
+func (r *ReconcileKconsumerGroup) reconcilePrometheusRule(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
 	pr := &monitoringv1.PrometheusRule{}
 	err := r.getObj(kgrp, pr)
 	if err != nil && errors.IsNotFound(err) {
@@ -428,7 +425,7 @@ func (r *ReconcileKconsumerGroup) createPrometheusRule(kgrp *thenextappsv1alpha1
 	return pr, r.setOwnerReference(kgrp, pr)
 }
 
-func (r *ReconcileKconsumerGroup) manageHPA(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
+func (r *ReconcileKconsumerGroup) reconcileHPA(kgrp *thenextappsv1alpha1.KconsumerGroup) (*reconcile.Result, error) {
 	hpa := &autoscaling.HorizontalPodAutoscaler{}
 	err := r.getObj(kgrp, hpa)
 	if err != nil && errors.IsNotFound(err) {
@@ -491,8 +488,8 @@ func (r *ReconcileKconsumerGroup) updateHPA(kgrp *thenextappsv1alpha1.KconsumerG
 func (r *ReconcileKconsumerGroup) getTopicStruct(kgrp *thenextappsv1alpha1.KconsumerGroup) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.GroupVersionKind{
-		Kind:    "KafkaTopic",
 		Group:   "kafka.strimzi.io",
+		Kind:    "KafkaTopic",
 		Version: "v1beta1",
 	})
 
@@ -503,13 +500,14 @@ func (r *ReconcileKconsumerGroup) getTopicStruct(kgrp *thenextappsv1alpha1.Kcons
 
 func (r *ReconcileKconsumerGroup) getTopicPartition(kgrp *thenextappsv1alpha1.KconsumerGroup) (int64, error) {
 	var partitions int64
+	var partitionsStr string
 	u := r.getTopicStruct(kgrp)
-	err := r.client.Get(context.TODO(), client.ObjectKey{
-		Name:      u.GetName(),
+	err := r.client.Get(context.TODO(), types.NamespacedName{
 		Namespace: u.GetNamespace(),
+		Name:      u.GetName(),
 	}, u)
 	if err != nil && errors.IsNotFound(err) {
-		log.Info("Topic not found")
+		log.Info("Topic not found: " + u.GetName())
 		partitions = 1
 		return partitions, nil
 	} else if err != nil {
@@ -517,11 +515,22 @@ func (r *ReconcileKconsumerGroup) getTopicPartition(kgrp *thenextappsv1alpha1.Kc
 		partitions = 1
 		return partitions, nil
 	}
+	log.Info("Found topic: " + kgrp.Spec.ConsumerSpec.Topic)
 	partitions, found, err := unstructured.NestedInt64(u.Object, "spec", "partitions")
 	if err != nil || found == false {
-		log.Error(err, "Problem getting topic partitions")
-		log.Info("Set default partitions to 1")
-		partitions = 1
+		// attempt again with string type
+		partitionsStr, found, err = unstructured.NestedString(u.Object, "spec", "partitions")
+		if err != nil || found == false {
+			log.Error(err, "Problem getting topic partitions")
+			log.Info("Set default partitions to 1")
+			partitions = 1
+			return partitions, nil
+		}
+		partitions, err := strconv.ParseInt(partitionsStr, 10, 64)
+		if err != nil {
+			partitions = 1
+		}
+		return partitions, nil
 	}
 	return partitions, nil
 }
@@ -544,6 +553,32 @@ func (r *ReconcileKconsumerGroup) setOwnerReference(kgrp *thenextappsv1alpha1.Kc
 		return err
 	}
 	return nil
+}
+
+func (r *ReconcileKconsumerGroup) updateStatus(kgrp *thenextappsv1alpha1.KconsumerGroup, message string, podStatus bool, err error) (*reconcile.Result, error) {
+	kgrp.Status.Message = fmt.Sprintf("Message: %s, Error: %v", message, err)
+
+	if podStatus == true {
+		pods := &corev1.PodList{}
+		opts := []client.ListOption{
+			client.InNamespace(kgrp.Namespace),
+			client.MatchingLabels(appLabels(kgrp.Name)),
+		}
+		if err := r.client.List(context.TODO(), pods, opts...); err != nil {
+			log.Error(err, "Failed to fetch pods", kgrp.Namespace, ":", kgrp.Name)
+			return &reconcile.Result{}, err
+		}
+		podNames := getPodNames(pods.Items)
+		if !reflect.DeepEqual(podNames, kgrp.Status.ActivePods) {
+			kgrp.Status.ActivePods = podNames
+		}
+	}
+
+	if err := r.client.Status().Update(context.TODO(), kgrp); err != nil {
+		log.Error(err, "Failed to update resource status")
+		return &reconcile.Result{}, err
+	}
+	return &reconcile.Result{}, nil
 }
 
 func (r *ReconcileKconsumerGroup) handleCreationResult(msg string, err error) (*reconcile.Result, error) {

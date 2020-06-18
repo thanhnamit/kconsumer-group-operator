@@ -25,6 +25,8 @@ import (
 	sdkVersion "github.com/operator-framework/operator-sdk/version"
 	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -38,7 +40,6 @@ var (
 	metricsHost               = "0.0.0.0"
 	metricsPort         int32 = 8383
 	operatorMetricsPort int32 = 8686
-	alertListenerHost   int32 = 8484
 )
 var log = logf.Log.WithName("cmd")
 
@@ -127,6 +128,24 @@ func main() {
 		log.Error(err, "")
 		os.Exit(1)
 	}
+
+	kafkaScheme := schema.GroupVersionKind{
+		Group:   "kafka.strimzi.io",
+		Kind:    "KafkaTopic",
+		Version: "v1beta1",
+	}
+
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "kafka.strimzi.io",
+		Kind:    "KafkaTopic",
+		Version: "v1beta1",
+	})
+
+	u.SetName("fast-data-topic")
+	u.SetNamespace(namespace)
+
+	mgr.GetScheme().AddKnownTypeWithName(kafkaScheme, u)
 
 	// Setup all Controllers
 	if err := controller.AddToManager(mgr); err != nil {

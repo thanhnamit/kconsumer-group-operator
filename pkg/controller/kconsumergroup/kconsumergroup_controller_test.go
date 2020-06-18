@@ -2,6 +2,7 @@ package kconsumergroup
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"reflect"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -23,64 +25,24 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 
+var (
+	name                = "kconsumer"
+	namespace           = "default"
+	replicas      int32 = 3
+	lagLimit      int32 = 1000
+	image               = "thenextapps/kconsumer:latest"
+	containerName       = "kconsumer"
+	topicName           = "fast-data-topic"
+	partitionSize int32 = 5
+)
+
 func TestKconsumerGroupController(t *testing.T) {
 	logf.SetLogger(logf.ZapLogger(true))
-	var (
-		name                = "kconsumer"
-		namespace           = "default"
-		replicas      int32 = 3
-		lagLimit      int32 = 1000
-		image               = "thenextapps/kconsumer:latest"
-		containerName       = "kconsumer"
-		topicName           = "fast-data-topic"
-	)
 
-	objMetaData := metav1.ObjectMeta{
-		Name:      name,
-		Namespace: namespace,
-	}
-
-	// A kconsumer group resource with metadata and spec.
-	kgrp := &thenextappsv1alpha1.KconsumerGroup{
-		ObjectMeta: objMetaData,
-		Spec: thenextappsv1alpha1.KconsumerGroupSpec{
-			MinReplicas:            replicas,
-			AverageRecordsLagLimit: lagLimit,
-			ConsumerSpec: thenextappsv1alpha1.ConsumerSpec{
-				Image:   image,
-				PodName: containerName,
-				Topic:   topicName,
-			},
-		},
-	}
-
-	topic := &unstructured.Unstructured{}
-	topic.SetUnstructuredContent(map[string]interface{}{
-		"apiVersion": "kafka.strimzi.io/v1beta1",
-		"kind":       "KafkaTopic",
-		"metadata": map[string]interface{}{
-			"name": topicName,
-			"labels": map[string]interface{}{
-				"strimzi.io/cluster": "my-cluster",
-			},
-		},
-		"spec": map[string]interface{}{
-			"partitions": "3",
-			"replicas":   "1",
-		},
-	})
-
-	sm := &monitoringv1.ServiceMonitor{
-		ObjectMeta: objMetaData,
-	}
-
-	hpa := &autoscaling.HorizontalPodAutoscaler{
-		ObjectMeta: objMetaData,
-	}
-
-	pr := &monitoringv1.PrometheusRule{
-		ObjectMeta: objMetaData,
-	}
+	objMetaData := getObjectMeta()
+	kgrp := getKconsumerGroup(objMetaData)
+	topic := getTopicStruct(partitionSize)
+	sm, hpa, pr := getChildObjs(objMetaData)
 
 	// Objects to track in the fake client.
 	objs := []runtime.Object{
@@ -93,6 +55,11 @@ func TestKconsumerGroupController(t *testing.T) {
 	s.AddKnownTypes(monitoringv1.SchemeGroupVersion, sm)
 	s.AddKnownTypes(monitoringv1.SchemeGroupVersion, pr)
 	s.AddKnownTypes(autoscaling.SchemeGroupVersion, hpa)
+	s.AddKnownTypeWithName(schema.GroupVersionKind{
+		Group:   "kafka.strimzi.io",
+		Kind:    "KafkaTopic",
+		Version: "v1beta1",
+	}, topic)
 
 	// Create a fake client to mock API calls.
 	cl := fake.NewFakeClient(objs...)
@@ -100,14 +67,8 @@ func TestKconsumerGroupController(t *testing.T) {
 	// Create a ReconcileKconsumerGroup object with the scheme and fake client.
 	r := &ReconcileKconsumerGroup{client: cl, scheme: s}
 
-	// Mock request to simulate Reconcile() being called on an event for a
-	// watched resource .
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      name,
-			Namespace: namespace,
-		},
-	}
+	// Mock request to simulate Reconcile() being called on an event for a watched owned resource .
+	req := mockRequest(namespace, name)
 
 	// ===== test Service to be created
 	reconcileAndCheckRequeue(t, r, req)
@@ -155,7 +116,13 @@ func TestKconsumerGroupController(t *testing.T) {
 		t.Errorf("hpa min replicas (%d) is not the expected (%d)", hpaMinReps, replicas)
 	}
 
+	hpaMaxReps := khpa.Spec.MaxReplicas
+	if hpaMaxReps != partitionSize {
+		t.Errorf("hpa max replicas (%d) is not the expected (%d)", hpaMaxReps, partitionSize)
+	}
+
 	// ===== test Deployment to be created
+	req = mockRequest(namespace, name)
 	reconcileAndCheckRequeue(t, r, req)
 	dep := &appsv1.Deployment{}
 	err = cl.Get(context.TODO(), req.NamespacedName, dep)
@@ -218,7 +185,7 @@ func reconcileAndCheckRequeue(t *testing.T, r *ReconcileKconsumerGroup, req reco
 
 	// Check the result of reconciliation to make sure it has the desired state.
 	if !res.Requeue {
-		t.Error("reconcile did not requeue request as expected #2")
+		t.Error("reconcile did not requeue request as expected")
 	}
 }
 
@@ -229,5 +196,72 @@ func reconcileAndCheckEmptyResult(t *testing.T, r *ReconcileKconsumerGroup, req 
 	}
 	if res != (reconcile.Result{}) {
 		t.Error("reconcile did not return an empty Result")
+	}
+}
+
+func mockRequest(namespace string, name string) reconcile.Request {
+	return reconcile.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      name,
+			Namespace: namespace,
+		},
+	}
+}
+
+func getChildObjs(objMetaData metav1.ObjectMeta) (*monitoringv1.ServiceMonitor, *autoscaling.HorizontalPodAutoscaler, *monitoringv1.PrometheusRule) {
+	sm := &monitoringv1.ServiceMonitor{
+		ObjectMeta: objMetaData,
+	}
+
+	hpa := &autoscaling.HorizontalPodAutoscaler{
+		ObjectMeta: objMetaData,
+	}
+
+	pr := &monitoringv1.PrometheusRule{
+		ObjectMeta: objMetaData,
+	}
+	return sm, hpa, pr
+}
+
+func getObjectMeta() metav1.ObjectMeta {
+	return metav1.ObjectMeta{
+		Name:      name,
+		Namespace: namespace,
+	}
+}
+
+// TODO: may be error here
+func getTopicStruct(partitions int32) *unstructured.Unstructured {
+	topic := &unstructured.Unstructured{}
+	topic.SetUnstructuredContent(map[string]interface{}{
+		"apiVersion": "kafka.strimzi.io/v1beta1",
+		"kind":       "KafkaTopic",
+		"metadata": map[string]interface{}{
+			"name":      topicName,
+			"namespace": namespace,
+			"labels": map[string]interface{}{
+				"strimzi.io/cluster": "my-cluster",
+			},
+		},
+		"spec": map[string]interface{}{
+			"partitions": fmt.Sprintf("%d", partitions),
+			"replicas":   "1",
+		},
+	})
+	return topic
+}
+
+func getKconsumerGroup(objectMetaData metav1.ObjectMeta) *thenextappsv1alpha1.KconsumerGroup {
+	return &thenextappsv1alpha1.KconsumerGroup{
+		ObjectMeta: objectMetaData,
+		Spec: thenextappsv1alpha1.KconsumerGroupSpec{
+			MinReplicas:            replicas,
+			AverageRecordsLagLimit: lagLimit,
+			ConsumerSpec: thenextappsv1alpha1.ConsumerSpec{
+				Image:   image,
+				PodName: containerName,
+				Topic:   topicName,
+			},
+		},
 	}
 }
