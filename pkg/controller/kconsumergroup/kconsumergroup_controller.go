@@ -457,8 +457,9 @@ func (r *ReconcileKconsumerGroup) createHPA(kgrp *thenextappsv1alpha1.KconsumerG
 		},
 		Spec: autoscaling.HorizontalPodAutoscalerSpec{
 			ScaleTargetRef: autoscaling.CrossVersionObjectReference{
-				Kind: "Deployment",
-				Name: kgrp.Name,
+				Kind:       "Deployment",
+				Name:       kgrp.Name,
+				APIVersion: "apps/v1",
 			},
 			MinReplicas: &kgrp.Spec.MinReplicas,
 			MaxReplicas: int32(partitions),
