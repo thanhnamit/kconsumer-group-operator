@@ -360,9 +360,9 @@ func (r *ReconcileKconsumerGroup) createDeployment(kgrp *thenextappsv1alpha1.Kco
 	return dp, r.setOwnerReference(kgrp, dp)
 }
 
+// updateDeployment lets HPA control the deployment replicas
 func (r *ReconcileKconsumerGroup) updateDeployment(kgrp *thenextappsv1alpha1.KconsumerGroup, dp *appsv1.Deployment) (bool, error) {
-	if *dp.Spec.Replicas != kgrp.Spec.MinReplicas || dp.Spec.Template.Spec.Containers[0].Image != kgrp.Spec.ConsumerSpec.Image {
-		dp.Spec.Replicas = &kgrp.Spec.MinReplicas
+	if dp.Spec.Template.Spec.Containers[0].Image != kgrp.Spec.ConsumerSpec.Image {
 		dp.Spec.Template.Spec.Containers[0].Image = kgrp.Spec.ConsumerSpec.Image
 		return true, r.setOwnerReference(kgrp, dp)
 	}
@@ -467,7 +467,7 @@ func (r *ReconcileKconsumerGroup) createHPA(kgrp *thenextappsv1alpha1.KconsumerG
 				{
 					Type: autoscaling.PodsMetricSourceType,
 					Pods: &autoscaling.PodsMetricSource{
-						MetricName:         "kafka_consumer_consumer_fetch_manager_metrics_records_lag",
+						MetricName:         "kafka_consumer_fetch_manager_records_lag_max",
 						TargetAverageValue: resource.MustParse(limit),
 					},
 				},
