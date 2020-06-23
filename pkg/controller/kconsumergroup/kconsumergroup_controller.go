@@ -179,11 +179,11 @@ func (r *ReconcileKconsumerGroup) Reconcile(request reconcile.Request) (reconcil
 	// Manage Kafka topic changes
 	reconcileResult, err = r.reconcileTopicChange(kgrp, request)
 	if err != nil {
-		reqLogger.Error(err, "Error with reconciling topic")
+		reqLogger.Error(err, "Error reconciling topic")
 		r.updateStatus(kgrp, "Error reconciling Kconsumer group for topic changes", false, err)
 		return *reconcileResult, err
 	} else if err == nil && reconcileResult != nil {
-		reqLogger.Error(err, "No Error with reconciling topic")
+		reqLogger.Info("Reconciled topic changes")
 		return *reconcileResult, nil
 	}
 
@@ -448,8 +448,8 @@ func (r *ReconcileKconsumerGroup) reconcileHPA(kgrp *thenextappsv1alpha1.Kconsum
 
 func (r *ReconcileKconsumerGroup) createHPA(kgrp *thenextappsv1alpha1.KconsumerGroup) (*autoscaling.HorizontalPodAutoscaler, error) {
 	partitions, _ := r.getTopicPartition(kgrp)
-	var limit string
-	limit = strconv.Itoa(int(kgrp.Spec.AverageRecordsLagLimit))
+	//var limit string
+	//limit = strconv.Itoa(int(kgrp.Spec.AverageRecordsLagLimit))
 	hpa := &autoscaling.HorizontalPodAutoscaler{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      kgrp.Name,
@@ -468,7 +468,7 @@ func (r *ReconcileKconsumerGroup) createHPA(kgrp *thenextappsv1alpha1.KconsumerG
 					Type: autoscaling.PodsMetricSourceType,
 					Pods: &autoscaling.PodsMetricSource{
 						MetricName:         "kafka_consumer_fetch_manager_records_lag_max",
-						TargetAverageValue: resource.MustParse(limit),
+						TargetAverageValue: *resource.NewQuantity(int64(kgrp.Spec.AverageRecordsLagLimit), resource.DecimalSI),
 					},
 				},
 			},
