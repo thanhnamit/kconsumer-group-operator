@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kconsumer
+  labels:
+    app: kconsumer
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: kconsumer
+  template:
+    metadata:
+      labels:
+        app: kconsumer
+    spec:
+      containers:
+      - name: kconsumer
+        image: thenextapps/kconsumer:latest
+        ports:
+        - containerPort: 8085
+          name: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kconsumer
+  labels:
+    app: kconsumer
+    k8s-app: kconsumer
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8085
+      targetPort: 8085
+      protocol: TCP
+      name: metrics
+  selector:
+    app: kconsumer

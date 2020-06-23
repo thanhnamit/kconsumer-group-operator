@@ -1,0 +1,24 @@
+server:
+  port: 8083
+
+topic: "fast-data-topic"
+
+spring:
+  kafka:
+    producer:
+      bootstrap-servers: my-cluster-kafka-bootstrap:9092
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+
+management:
+  endpoint:
+    health:
+      enabled: true
+  endpoints:
+    web:
+      exposure:
+        include:
+          - prometheus
+          - health
+          - info

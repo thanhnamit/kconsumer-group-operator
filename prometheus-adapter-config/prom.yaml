@@ -1,0 +1,3 @@
+prometheus:
+  url: http://prometheus-k8s
+  port: 9090

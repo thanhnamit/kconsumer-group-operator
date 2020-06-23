@@ -1,0 +1,13 @@
+apiVersion: skaffold/v2beta4
+kind: Config
+build:
+  local:
+    push: false
+  artifacts:
+    - image: thenextapps/kproducer
+      jib:
+        type: gradle
+deploy:
+  kubectl:
+    manifests:
+      - k8s/*.yaml

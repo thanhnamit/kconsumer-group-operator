@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kconsumer
+  labels:
+    app: kconsumer
+spec:
+  jobLabel: kconsumer
+  selector:
+    matchLabels:
+      app: kconsumer
+  namespaceSelector:
+    matchNames:
+    - default
+  endpoints:
+    - port: metrics
+      path: '/actuator/prometheus'
+      scheme: http
+      interval: 5s
+      honorLabels: true

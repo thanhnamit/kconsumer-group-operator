@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  creationTimestamp: null
+  labels:
+    prometheus: k8s
+    role: alert-rules
+  name: kconsumer-alert-rule
+  namespace: monitoring
+spec:
+  groups:
+  - name: ./kconsumer.rules
+    rules:
+    - alert: RecordsLagBreached-kconsumer
+      annotations:
+        message: Kafka consumers is running behind for {{ $value }} messages
+      expr: sum(kafka_consumer_fetch_manager_records_lag{topic="fast-data-topic",client_id="kconsumer-app-0"}) > 2000
+      for: 1m
+      labels:
+        severity: warning
