@@ -1,7 +1,7 @@
 # Kafka consumer group operator
 
 kconsumer-group-operator is a kubernetes operator built to manage Kafka consumer group. The details of this design is
-described in an accompanying blog at thenextapps.com/2020/06/19/managing-kafka-consumers-with-operator-pattern/
+described in an accompanying blog at https://thanhnamit.netlify.app/2020/08/25/scaling-a-kafka-consumer-group-with-kubernetes-operator-and-hpa/
 
 ## Installation
 
